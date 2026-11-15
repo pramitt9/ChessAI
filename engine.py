@@ -206,34 +206,51 @@ def _move_ordering(board, tt_move=None):
     return sorted(list(board.legal_moves), key=score, reverse=True)
 
 
+
 def _quiescence(board, alpha, beta, ply, qdepth=8):
-    """Search forcing captures (and all evasions while in check) at the horizon."""
+    """Search forcing captures and check evasions at the horizon."""
     if board.is_checkmate():
         return -MATE_SCORE + ply
+
     if board.is_game_over(claim_draw=True):
         return 0
 
     in_check = board.is_check()
-    stand_pat = -INF if in_check else evaluate_board(board) * (1 if board.turn == chess.WHITE else -1)
 
+    # A checked side cannot use a static stand-pat evaluation.
     if not in_check:
+        stand_pat = evaluate_board(board) * (
+            1 if board.turn == chess.WHITE else -1
+        )
+
         if stand_pat >= beta:
             return beta
+
         alpha = max(alpha, stand_pat)
 
-    if qdepth <= 0:
-        return stand_pat
+        # At the depth limit, a quiet position can be evaluated.
+        if qdepth <= 0:
+            return alpha
 
+    # In check, search all legal evasions, even at the depth limit.
     moves = list(board.legal_moves)
+
     if not in_check:
-        moves = [m for m in moves if board.is_capture(m) or m.promotion]
+        moves = [
+            move for move in moves
+            if board.is_capture(move) or move.promotion
+        ]
 
     moves = sorted(
         moves,
-        key=lambda m: (
-            PIECE_VALUES.get(board.piece_type_at(m.to_square), 100)
-            if board.is_capture(m) else 0
-        ) + (PIECE_VALUES.get(m.promotion, 0) if m.promotion else 0),
+        key=lambda move: (
+            PIECE_VALUES.get(
+                board.piece_type_at(move.to_square), 100
+            ) if board.is_capture(move) else 0
+        ) + (
+            PIECE_VALUES.get(move.promotion, 0)
+            if move.promotion else 0
+        ),
         reverse=True,
     )
 
@@ -242,12 +259,18 @@ def _quiescence(board, alpha, beta, ply, qdepth=8):
 
     for move in moves:
         board.push(move)
-        score = -_quiescence(board, -beta, -alpha, ply + 1, qdepth - 1)
+        score = -_quiescence(
+            board, -beta, -alpha, ply + 1, qdepth - 1
+        )
         board.pop()
+
         if score >= beta:
             return beta
+
         alpha = max(alpha, score)
+
     return alpha
+
 
 
 def _search(board, depth, alpha, beta, ply, table):
