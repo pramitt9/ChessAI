@@ -1,32 +1,192 @@
 import chess
 
+# Scores are in centipawns. Evaluation is always from White's perspective.
 PIECE_VALUES = {
     chess.PAWN: 100,
     chess.KNIGHT: 320,
-    chess.BISHOP: 330,
+    chess.BISHOP: 335,
     chess.ROOK: 500,
     chess.QUEEN: 900,
     chess.KING: 0,
 }
+MATE_SCORE = 100_000
+INF = 1_000_000
+
+# Piece-square tables are indexed from White's point of view (a1 = 0).
+# Black's tables are mirrored vertically.
+PST = {
+    chess.PAWN: [
+         0,  0,  0,  0,  0,  0,  0,  0,
+        50, 50, 50, 50, 50, 50, 50, 50,
+        10, 10, 20, 30, 30, 20, 10, 10,
+         5,  5, 10, 25, 25, 10,  5,  5,
+         0,  0,  0, 20, 20,  0,  0,  0,
+         5, -5,-10,  0,  0,-10, -5,  5,
+         5, 10, 10,-20,-20, 10, 10,  5,
+         0,  0,  0,  0,  0,  0,  0,  0,
+    ],
+    chess.KNIGHT: [
+       -50,-40,-30,-30,-30,-30,-40,-50,
+       -40,-20,  0,  5,  5,  0,-20,-40,
+       -30,  5, 10, 15, 15, 10,  5,-30,
+       -30,  0, 15, 20, 20, 15,  0,-30,
+       -30,  5, 15, 20, 20, 15,  5,-30,
+       -30,  0, 10, 15, 15, 10,  0,-30,
+       -40,-20,  0,  0,  0,  0,-20,-40,
+       -50,-40,-30,-30,-30,-30,-40,-50,
+    ],
+    chess.BISHOP: [
+       -20,-10,-10,-10,-10,-10,-10,-20,
+       -10,  5,  0,  0,  0,  0,  5,-10,
+       -10, 10, 10, 10, 10, 10, 10,-10,
+       -10,  0, 10, 10, 10, 10,  0,-10,
+       -10,  5,  5, 10, 10,  5,  5,-10,
+       -10,  0,  5, 10, 10,  5,  0,-10,
+       -10,  0,  0,  0,  0,  0,  0,-10,
+       -20,-10,-10,-10,-10,-10,-10,-20,
+    ],
+    chess.ROOK: [
+         0,  0,  0,  5,  5,  0,  0,  0,
+         5, 10, 10, 10, 10, 10, 10,  5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+         0,  0,  0,  5,  5,  0,  0,  0,
+    ],
+    chess.QUEEN: [
+       -20,-10,-10, -5, -5,-10,-10,-20,
+       -10,  0,  5,  0,  0,  0,  0,-10,
+       -10,  5,  5,  5,  5,  5,  0,-10,
+         0,  0,  5,  5,  5,  5,  0, -5,
+        -5,  0,  5,  5,  5,  5,  0, -5,
+       -10,  0,  5,  5,  5,  5,  0,-10,
+       -10,  0,  0,  0,  0,  0,  0,-10,
+       -20,-10,-10, -5, -5,-10,-10,-20,
+    ],
+    chess.KING: [
+       -30,-40,-40,-50,-50,-40,-40,-30,
+       -30,-40,-40,-50,-50,-40,-40,-30,
+       -30,-40,-40,-50,-50,-40,-40,-30,
+       -30,-40,-40,-50,-50,-40,-40,-30,
+       -20,-30,-30,-40,-40,-30,-30,-20,
+       -10,-20,-20,-20,-20,-20,-20,-10,
+        20, 20,  0,  0,  0,  0, 20, 20,
+        20, 30, 10,  0,  0, 10, 30, 20,
+    ],
+}
 
 
-def evaluate_board(board: chess.Board) -> int:
-    """Evaluate from White's perspective. Positive means White is better."""
+def _piece_square_value(piece_type, square, color):
+    index = square if color == chess.WHITE else chess.square_mirror(square)
+    return PST[piece_type][index]
+
+
+def _pawn_structure(board, color):
+    pawns = list(board.pieces(chess.PAWN, color))
+    files = [0] * 8
+    for sq in pawns:
+        files[chess.square_file(sq)] += 1
+
+    score = 0
+    # Doubled pawns: extra pawns stacked on the same file are a weakness.
+    for count in files:
+        if count > 1:
+            score -= 12 * (count - 1)
+
+    # Isolated pawns have no friendly pawn on either adjacent file.
+    for sq in pawns:
+        file_ = chess.square_file(sq)
+        adjacent = (file_ > 0 and files[file_ - 1] > 0) or (
+            file_ < 7 and files[file_ + 1] > 0
+        )
+        if not adjacent:
+            score -= 10
+
+    # Passed pawns receive a bonus that grows as they approach promotion.
+    enemy_pawns = board.pieces(chess.PAWN, not color)
+    for sq in pawns:
+        file_ = chess.square_file(sq)
+        rank = chess.square_rank(sq)
+        blocked_by_enemy = False
+        for enemy_sq in enemy_pawns:
+            enemy_file = chess.square_file(enemy_sq)
+            enemy_rank = chess.square_rank(enemy_sq)
+            if abs(enemy_file - file_) <= 1:
+                if color == chess.WHITE and enemy_rank > rank:
+                    blocked_by_enemy = True
+                elif color == chess.BLACK and enemy_rank < rank:
+                    blocked_by_enemy = True
+        if not blocked_by_enemy:
+            advance = rank if color == chess.WHITE else 7 - rank
+            score += 12 + advance * 8
+    return score
+
+
+def _king_safety(board, color):
+    king = board.king(color)
+    if king is None:
+        return -MATE_SCORE
+    file_ = chess.square_file(king)
+    rank = chess.square_rank(king)
+    score = 0
+
+    # A castled king generally benefits from a pawn shield.
+    direction = 1 if color == chess.WHITE else -1
+    shield_rank = rank + direction
+    if 0 <= shield_rank <= 7:
+        for f in range(max(0, file_ - 1), min(7, file_ + 1) + 1):
+            sq = chess.square(f, shield_rank)
+            if board.piece_at(sq) == chess.Piece(chess.PAWN, color):
+                score += 9
+    # Penalize a king that has lost castling rights in the opening/middlegame.
+    if board.fullmove_number < 30 and not board.has_castling_rights(color):
+        score -= 12
+    return score
+
+
+def evaluate_board(board):
+    """Static position evaluation from White's perspective."""
     if board.is_checkmate():
-        return -100000 if board.turn == chess.WHITE else 100000
+        return -MATE_SCORE if board.turn == chess.WHITE else MATE_SCORE
     if board.is_game_over(claim_draw=True):
         return 0
 
     score = 0
     for piece_type, value in PIECE_VALUES.items():
-        score += len(board.pieces(piece_type, chess.WHITE)) * value
-        score -= len(board.pieces(piece_type, chess.BLACK)) * value
-    return score
+        for sq in board.pieces(piece_type, chess.WHITE):
+            score += value + _piece_square_value(piece_type, sq, chess.WHITE)
+        for sq in board.pieces(piece_type, chess.BLACK):
+            score -= value + _piece_square_value(piece_type, sq, chess.BLACK)
+
+    # Bishop pair bonus.
+    if len(board.pieces(chess.BISHOP, chess.WHITE)) >= 2:
+        score += 28
+    if len(board.pieces(chess.BISHOP, chess.BLACK)) >= 2:
+        score -= 28
+
+    score += _pawn_structure(board, chess.WHITE)
+    score -= _pawn_structure(board, chess.BLACK)
+    score += _king_safety(board, chess.WHITE)
+    score -= _king_safety(board, chess.BLACK)
+
+    # Small mobility term. Legal move generation is deliberately kept modest.
+    turn = board.turn
+    board.turn = chess.WHITE
+    white_mobility = board.legal_moves.count()
+    board.turn = chess.BLACK
+    black_mobility = board.legal_moves.count()
+    board.turn = turn
+    score += 2 * (white_mobility - black_mobility)
+
+    return int(score)
 
 
-def move_ordering(board: chess.Board):
-    """Try forcing moves first to make alpha-beta pruning more effective."""
+def _move_ordering(board, tt_move=None):
     def score(move):
+        if tt_move is not None and move == tt_move:
+            return 1_000_000
         value = 0
         if board.is_capture(move):
             victim = board.piece_at(move.to_square)
@@ -38,71 +198,125 @@ def move_ordering(board: chess.Board):
             attacker_value = PIECE_VALUES[attacker.piece_type]
             value += 10 * victim_value - attacker_value
         if move.promotion:
-            value += PIECE_VALUES[move.promotion]
+            value += PIECE_VALUES[move.promotion] + 800
         if board.gives_check(move):
-            value += 50
+            value += 40
         return value
 
     return sorted(list(board.legal_moves), key=score, reverse=True)
 
 
-def minimax(board: chess.Board, depth: int, alpha: float, beta: float, ply: int = 0) -> int:
-    """Alpha-beta minimax. Scores are always from White's perspective."""
+def _quiescence(board, alpha, beta, ply, qdepth=8):
+    """Search forcing captures (and all evasions while in check) at the horizon."""
     if board.is_checkmate():
-        return -100000 + ply if board.turn == chess.WHITE else 100000 - ply
+        return -MATE_SCORE + ply
+    if board.is_game_over(claim_draw=True):
+        return 0
+
+    in_check = board.is_check()
+    stand_pat = -INF if in_check else evaluate_board(board) * (1 if board.turn == chess.WHITE else -1)
+
+    if not in_check:
+        if stand_pat >= beta:
+            return beta
+        alpha = max(alpha, stand_pat)
+
+    if qdepth <= 0:
+        return stand_pat
+
+    moves = list(board.legal_moves)
+    if not in_check:
+        moves = [m for m in moves if board.is_capture(m) or m.promotion]
+
+    moves = sorted(
+        moves,
+        key=lambda m: (
+            PIECE_VALUES.get(board.piece_type_at(m.to_square), 100)
+            if board.is_capture(m) else 0
+        ) + (PIECE_VALUES.get(m.promotion, 0) if m.promotion else 0),
+        reverse=True,
+    )
+
+    if in_check and not moves:
+        return -MATE_SCORE + ply
+
+    for move in moves:
+        board.push(move)
+        score = -_quiescence(board, -beta, -alpha, ply + 1, qdepth - 1)
+        board.pop()
+        if score >= beta:
+            return beta
+        alpha = max(alpha, score)
+    return alpha
+
+
+def _search(board, depth, alpha, beta, ply, table):
+    if board.is_checkmate():
+        return -MATE_SCORE + ply
     if board.is_game_over(claim_draw=True):
         return 0
     if depth <= 0:
-        return evaluate_board(board)
+        return _quiescence(board, alpha, beta, ply)
 
-    maximizing = board.turn == chess.WHITE
-    if maximizing:
-        best = -float("inf")
-        for move in move_ordering(board):
-            board.push(move)
-            value = minimax(board, depth - 1, alpha, beta, ply + 1)
-            board.pop()
-            best = max(best, value)
-            alpha = max(alpha, best)
-            if beta <= alpha:
-                break
-        return int(best)
+    key = board.fen()
+    alpha_original = alpha
+    tt_entry = table.get(key)
+    tt_move = None
+    if tt_entry:
+        tt_depth, tt_score, tt_flag, tt_best = tt_entry
+        tt_move = chess.Move.from_uci(tt_best) if tt_best else None
+        if tt_depth >= depth:
+            if tt_flag == "exact":
+                return tt_score
+            if tt_flag == "lower":
+                alpha = max(alpha, tt_score)
+            elif tt_flag == "upper":
+                beta = min(beta, tt_score)
+            if alpha >= beta:
+                return tt_score
 
-    best = float("inf")
-    for move in move_ordering(board):
+    best_score = -INF
+    best_move = None
+    for move in _move_ordering(board, tt_move):
         board.push(move)
-        value = minimax(board, depth - 1, alpha, beta, ply + 1)
+        score = -_search(board, depth - 1, -beta, -alpha, ply + 1, table)
         board.pop()
-        best = min(best, value)
-        beta = min(beta, best)
-        if beta <= alpha:
+
+        if score > best_score:
+            best_score = score
+            best_move = move
+        alpha = max(alpha, best_score)
+        if alpha >= beta:
             break
-    return int(best)
+
+    flag = "exact"
+    if best_score <= alpha_original:
+        flag = "upper"
+    elif best_score >= beta:
+        flag = "lower"
+    table[key] = (depth, best_score, flag, best_move.uci() if best_move else None)
+    return best_score
 
 
-def get_best_move(board: chess.Board, depth: int = 3):
-    """Return the best legal move for the side to move."""
+def get_best_move(board, depth=3):
+    """Choose a legal move using negamax, alpha-beta, quiescence and a transposition table."""
     if board.is_game_over(claim_draw=True):
         return None
-    if not 1 <= depth <= 5:
-        raise ValueError("Depth must be between 1 and 5.")
+    if not 1 <= depth <= 6:
+        raise ValueError("Depth must be between 1 and 6.")
 
-    maximizing = board.turn == chess.WHITE
+    table = {}
     best_move = None
-    best_score = -float("inf") if maximizing else float("inf")
-    alpha, beta = -float("inf"), float("inf")
+    best_score = -INF
+    alpha, beta = -INF, INF
 
-    for move in move_ordering(board):
+    for move in _move_ordering(board):
         board.push(move)
-        value = minimax(board, depth - 1, alpha, beta, 1)
+        score = -_search(board, depth - 1, -beta, -alpha, 1, table)
         board.pop()
-
-        if (maximizing and value > best_score) or (not maximizing and value < best_score):
-            best_score, best_move = value, move
-
-        if maximizing:
-            alpha = max(alpha, best_score)
-        else:
-            beta = min(beta, best_score)
+        if score > best_score:
+            best_score = score
+            best_move = move
+        alpha = max(alpha, best_score)
 
     return best_move
