@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChessAI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/">♟ <span>ChessAI</span></a>
+      <span class="engine-tag"><i></i> Minimax · Alpha-Beta</span>
+    </header>
+
+    <section class="game-layout">
+      <div class="board-column">
+        <div class="player-strip">
+          <div class="avatar">♟</div>
+          <div><strong>ChessAI</strong><small id="bot-label">Engine · Black</small></div>
+          <span class="depth-pill" id="depth-label">Depth 3</span>
+        </div>
+        <div class="board-frame">
+          <div id="board" class="board" aria-label="Chessboard"></div>
+        </div>
+        <div class="player-strip human-strip">
+          <div class="avatar human-avatar">♙</div>
+          <div><strong>You</strong><small id="human-label">Human · White</small></div>
+          <span class="turn-indicator" id="turn-indicator"></span>
+        </div>
+      </div>
+
+      <aside class="side-panel">
+        <div class="panel-heading">
+          <div><span class="eyebrow">YOUR MATCH</span><h1>Play Chess</h1></div>
+          <span class="live-dot"></span>
+        </div>
+        <div class="status-card">
+          <span class="status-icon">♟</span>
+          <div><small>GAME STATUS</small><strong id="status">Choose your side to begin</strong></div>
+        </div>
+
+        <div class="setting-group">
+          <label for="color-select">Play as</label>
+          <select id="color-select">
+            <option value="white">White</option>
+            <option value="black">Black</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <div class="label-row"><label for="depth-select">Engine difficulty</label><span id="depth-value">Depth 3</span></div>
+          <select id="depth-select">
+            <option value="1">Depth 1 · Very easy</option>
+            <option value="2">Depth 2 · Easy</option>
+            <option value="3" selected>Depth 3 · Normal</option>
+            <option value="4">Depth 4 · Hard</option>
+            <option value="5">Depth 5 · Very hard</option>
+          </select>
+          <p class="hint">Higher depth means more positions searched and usually a slower move.</p>
+        </div>
+
+        <button id="new-game" class="primary-button">Start new game</button>
+        <div class="section-divider"></div>
+        <div class="moves-heading"><div><span class="eyebrow">GAME RECORD</span><h2>Move history</h2></div><button id="copy-pgn" class="small-button">Copy PGN</button></div>
+        <div id="move-list" class="move-list"><p class="empty-state">Your moves will appear here.</p></div>
+        <div class="footer-note"><span>♜</span> Powered by your own Python chess engine</div>
+      </aside>
+    </section>
+    <div id="toast" class="toast" role="status"></div>
+  </main>
+  <script src="{{ url_for('static', filename='chess.js') }}"></script>
+</body>
+</html>
