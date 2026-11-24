@@ -207,7 +207,7 @@ def _move_ordering(board, tt_move=None):
 
 
 
-def _quiescence(board, alpha, beta, ply, qdepth=8):
+def _quiescence(board, alpha, beta, ply, qdepth=8, evaluator="handcrafted"):
     """Search forcing captures and check evasions at the horizon."""
     if board.is_checkmate():
         return -MATE_SCORE + ply
@@ -219,7 +219,13 @@ def _quiescence(board, alpha, beta, ply, qdepth=8):
 
     # A checked side cannot use a static stand-pat evaluation.
     if not in_check:
-        stand_pat = evaluate_board(board) * (
+        if evaluator == "ml":
+            from ml_evaluator import evaluate_ml_white
+            white_score = evaluate_ml_white(board)
+        else:
+            white_score = evaluate_board(board)
+
+        stand_pat = white_score * (
             1 if board.turn == chess.WHITE else -1
         )
 
@@ -260,7 +266,7 @@ def _quiescence(board, alpha, beta, ply, qdepth=8):
     for move in moves:
         board.push(move)
         score = -_quiescence(
-            board, -beta, -alpha, ply + 1, qdepth - 1
+            board, -beta, -alpha, ply + 1, qdepth - 1, evaluator
         )
         board.pop()
 
@@ -273,13 +279,13 @@ def _quiescence(board, alpha, beta, ply, qdepth=8):
 
 
 
-def _search(board, depth, alpha, beta, ply, table):
+def _search(board, depth, alpha, beta, ply, table, evaluator="handcrafted"):
     if board.is_checkmate():
         return -MATE_SCORE + ply
     if board.is_game_over(claim_draw=True):
         return 0
     if depth <= 0:
-        return _quiescence(board, alpha, beta, ply)
+        return _quiescence(board, alpha, beta, ply, evaluator=evaluator)
 
     key = board.fen()
     alpha_original = alpha
@@ -302,7 +308,9 @@ def _search(board, depth, alpha, beta, ply, table):
     best_move = None
     for move in _move_ordering(board, tt_move):
         board.push(move)
-        score = -_search(board, depth - 1, -beta, -alpha, ply + 1, table)
+        score = -_search(
+            board, depth - 1, -beta, -alpha, ply + 1, table, evaluator
+        )
         board.pop()
 
         if score > best_score:
@@ -321,10 +329,12 @@ def _search(board, depth, alpha, beta, ply, table):
     return best_score
 
 
-def get_best_move(board, depth=3):
+def get_best_move(board, depth=3, evaluator="handcrafted"):
     """Choose a legal move using negamax, alpha-beta, quiescence and a transposition table."""
     if board.is_game_over(claim_draw=True):
         return None
+    if evaluator not in ("handcrafted", "ml"):
+        raise ValueError("Evaluator must be 'handcrafted' or 'ml'.")
     if not 1 <= depth <= 6:
         raise ValueError("Depth must be between 1 and 6.")
 
@@ -335,7 +345,9 @@ def get_best_move(board, depth=3):
 
     for move in _move_ordering(board):
         board.push(move)
-        score = -_search(board, depth - 1, -beta, -alpha, 1, table)
+        score = -_search(
+            board, depth - 1, -beta, -alpha, 1, table, evaluator
+        )
         board.pop()
         if score > best_score:
             best_score = score
